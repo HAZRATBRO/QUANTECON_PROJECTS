@@ -1,11 +1,37 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { useTheme } from '../lib/theme';
 
 const links = [
   { to: '/', label: 'Overview', end: true },
   { to: '/bonds', label: 'Bonds & Rates' },
+  { to: '/equity', label: 'Equity' },
   { to: '/options', label: 'Options' },
   { to: '/fx', label: 'FX' },
 ];
+
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      className="flex h-8 w-8 items-center justify-center rounded-lg border border-ink-700/60 text-ink-300 transition-colors hover:bg-ink-800 hover:text-ink-50"
+    >
+      {theme === 'dark' ? (
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 export default function Layout() {
   return (
@@ -18,7 +44,7 @@ export default function Layout() {
             </div>
             <div className="leading-tight">
               <div className="text-sm font-semibold text-ink-50">QuantEcon Calculator</div>
-              <div className="text-[11px] text-ink-400">Bonds &middot; Options &middot; FX</div>
+              <div className="text-[11px] text-ink-400">India-first &middot; Bonds &middot; Equity &middot; Options &middot; FX</div>
             </div>
           </div>
           <nav className="ml-auto flex items-center gap-1">
@@ -37,14 +63,17 @@ export default function Layout() {
               </NavLink>
             ))}
           </nav>
+          <ThemeToggle />
         </div>
       </header>
       <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         <Outlet />
       </main>
       <footer className="mx-auto max-w-[1400px] px-4 py-8 text-xs text-ink-500 sm:px-6">
-        All market data on this site is synthetic sample data generated for illustration, not live prices. Formulas
-        and numerical methods are the real thing.
+        Prices and FX rates are fetched live from open, keyless sources where possible; if a live fetch fails
+        (network, rate limits, etc.), the page falls back to clearly-labeled sample data. Option chains are always
+        priced from real spot/rate inputs through the pricing math shown, not sourced from an exchange feed. Bond
+        yields are illustrative sample data — no free live sovereign-curve source exists.
       </footer>
     </div>
   );

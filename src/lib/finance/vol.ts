@@ -115,6 +115,11 @@ export function buildVolSurface(
 ): VolSurfaceGrid {
   const sorted = [...smiles].sort((a, b) => a.T - b.T);
   const moneyness = linspace(moneynessRange[0], moneynessRange[1], nK);
+
+  if (sorted.length === 0) {
+    return { moneyness, tenors: [], iv: [], smiles: [] };
+  }
+
   const minT = sorted[0]?.T ?? 0.05;
   const maxT = sorted[sorted.length - 1]?.T ?? 2;
   const tenors = linspace(minT, maxT, nT);

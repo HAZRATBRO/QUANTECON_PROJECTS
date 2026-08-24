@@ -1,31 +1,56 @@
 import { useMemo, useState } from 'react';
-import DarkPlot, { plotColors } from '../components/DarkPlot';
+import DarkPlot from '../components/DarkPlot';
+import { useChartColors } from '../lib/chartColors';
 import { Card, Field, Katex, MathBlock, Pill, selectClass, Stat } from '../components/ui';
-import { chain, dividendYield, expiries, riskFreeRate, trades } from '../data/optionsChain';
-import { equitySpot, equitySpotHistory, equityUnderlying } from '../data/priceHistory';
+import { fetchEquitySeries, quoteFromSeries } from '../lib/data/equity';
+import { equitySymbols, indicativeRates } from '../lib/data/symbols';
+import { useAsyncData } from '../lib/data/useAsyncData';
+import { formatMoney, pct } from '../lib/format';
+import { buildOptionChain, type Expiry } from '../lib/finance/chainFactory';
 import { bsGreeks, checkPutCallParity, impliedVol } from '../lib/finance/options';
 import { buildVolSurface, fitQuadraticSmile, realizedVol, rollingRealizedVol, type SmileFit } from '../lib/finance/vol';
 
-function pct(x: number, dp = 2) {
-  return `${(x * 100).toFixed(dp)}%`;
-}
+const dividendYield = 0.01; // flat illustrative assumption across names
+
+const indiaSymbols = equitySymbols.filter((s) => s.region === 'IN');
+const globalSymbols = equitySymbols.filter((s) => s.region === 'GLOBAL');
 
 export default function OptionsPage() {
-  const [expiryId, setExpiryId] = useState(expiries[1].id);
-  const expiry = expiries.find((e) => e.id === expiryId)!;
+  const colors = useChartColors();
+  const [symbolTicker, setSymbolTicker] = useState(equitySymbols[0].symbol); // NIFTY 50 by default
+  const sym = equitySymbols.find((s) => s.symbol === symbolTicker) ?? equitySymbols[0];
+  const riskFreeRate = indicativeRates[sym.currency] ?? 0.05;
 
-  const rowsForExpiry = useMemo(() => chain.filter((r) => r.expiryId === expiryId), [expiryId]);
+  const { data: series, loading } = useAsyncData(() => fetchEquitySeries(sym), [sym.symbol]);
+  const quote = useMemo(() => (series ? quoteFromSeries(sym, series) : null), [series, sym]);
+  const spot = quote?.price ?? 0;
+
+  const chainSet = useMemo(
+    () => (spot > 0 ? buildOptionChain(sym.symbol, spot, riskFreeRate, dividendYield) : null),
+    [sym.symbol, spot, riskFreeRate],
+  );
+
+  const [expiryId, setExpiryId] = useState<string | null>(null);
+  const expiries: Expiry[] = chainSet?.expiries ?? [];
+  const activeExpiryId = expiryId ?? expiries[1]?.id ?? expiries[0]?.id;
+  const expiry = expiries.find((e) => e.id === activeExpiryId);
+
+  const rowsForExpiry = useMemo(
+    () => (chainSet ? chainSet.chain.filter((r) => r.expiryId === activeExpiryId) : []),
+    [chainSet, activeExpiryId],
+  );
 
   const rowsWithIv = useMemo(
     () =>
-      rowsForExpiry.map((r) => {
-        const iv = impliedVol(r.mid, { S: equitySpot, K: r.strike, T: r.T, r: riskFreeRate, q: dividendYield, type: r.type });
-        return { ...r, iv };
-      }),
-    [rowsForExpiry],
+      expiry
+        ? rowsForExpiry.map((r) => {
+            const iv = impliedVol(r.mid, { S: spot, K: r.strike, T: r.T, r: riskFreeRate, q: dividendYield, type: r.type });
+            return { ...r, iv };
+          })
+        : [],
+    [rowsForExpiry, expiry, spot, riskFreeRate],
   );
 
-  // Pair calls/puts by strike for a chain-style table.
   const strikes = useMemo(() => Array.from(new Set(rowsWithIv.map((r) => r.strike))).sort((a, b) => a - b), [rowsWithIv]);
   const byStrikeType = useMemo(() => {
     const m = new Map<string, (typeof rowsWithIv)[number]>();
@@ -33,63 +58,75 @@ export default function OptionsPage() {
     return m;
   }, [rowsWithIv]);
 
-  const [parityStrike, setParityStrike] = useState<number>(strikes[Math.floor(strikes.length / 2)]);
-  const call = byStrikeType.get(`${parityStrike}-call`);
-  const put = byStrikeType.get(`${parityStrike}-put`);
+  const [parityStrike, setParityStrike] = useState<number | null>(null);
+  const activeParityStrike = parityStrike ?? strikes[Math.floor(strikes.length / 2)];
+  const call = byStrikeType.get(`${activeParityStrike}-call`);
+  const put = byStrikeType.get(`${activeParityStrike}-put`);
   const parity = useMemo(() => {
-    if (!call || !put) return null;
-    return checkPutCallParity(call.mid, put.mid, equitySpot, parityStrike, riskFreeRate, dividendYield, expiry.T);
-  }, [call, put, parityStrike, expiry.T]);
+    if (!call || !put || !expiry) return null;
+    return checkPutCallParity(call.mid, put.mid, spot, activeParityStrike, riskFreeRate, dividendYield, expiry.T);
+  }, [call, put, activeParityStrike, expiry, spot, riskFreeRate]);
 
-  const rv = useMemo(() => realizedVol(equitySpotHistory.map((p) => p.close), 252), []);
-  const rvSeries = useMemo(() => rollingRealizedVol(equitySpotHistory.map((p) => p.close), 21), []);
+  const rv = useMemo(() => (series ? realizedVol(series.closes, 252) : 0), [series]);
+  const rvSeries = useMemo(() => (series ? rollingRealizedVol(series.closes, 21) : []), [series]);
 
-  // ATM implied vol term structure (for implied-vs-realized comparison)
   const atmIvByExpiry = useMemo(() => {
-    return expiries.map((e) => {
-      const rows = chain.filter((r) => r.expiryId === e.id);
-      const atmStrike = rows.reduce((best, r) => (Math.abs(r.strike - equitySpot) < Math.abs(best.strike - equitySpot) ? r : best), rows[0]);
+    if (!chainSet) return [];
+    return chainSet.expiries.map((e) => {
+      const rows = chainSet.chain.filter((r) => r.expiryId === e.id);
+      const atmStrike = rows.reduce((best, r) => (Math.abs(r.strike - spot) < Math.abs(best.strike - spot) ? r : best), rows[0]);
       const callRow = rows.find((r) => r.strike === atmStrike.strike && r.type === 'call')!;
-      const iv = impliedVol(callRow.mid, { S: equitySpot, K: callRow.strike, T: e.T, r: riskFreeRate, q: dividendYield, type: 'call' });
+      const iv = impliedVol(callRow.mid, { S: spot, K: callRow.strike, T: e.T, r: riskFreeRate, q: dividendYield, type: 'call' });
       return { label: e.label, T: e.T, iv: iv.iv };
     });
-  }, []);
+  }, [chainSet, spot, riskFreeRate]);
 
   const smiles = useMemo<SmileFit[]>(() => {
-    return expiries.map((e) => {
-      const rows = chain.filter((r) => r.expiryId === e.id);
-      const forward = equitySpot * Math.exp((riskFreeRate - dividendYield) * e.T);
+    if (!chainSet) return [];
+    return chainSet.expiries.map((e) => {
+      const rows = chainSet.chain.filter((r) => r.expiryId === e.id);
+      const forward = spot * Math.exp((riskFreeRate - dividendYield) * e.T);
       const pts = rows
         .filter((r) => r.type === (r.strike >= forward ? 'call' : 'put'))
         .map((r) => {
-          const iv = impliedVol(r.mid, { S: equitySpot, K: r.strike, T: e.T, r: riskFreeRate, q: dividendYield, type: r.type });
+          const iv = impliedVol(r.mid, { S: spot, K: r.strike, T: e.T, r: riskFreeRate, q: dividendYield, type: r.type });
           return { k: Math.log(r.strike / forward), iv: iv.iv };
         });
       return fitQuadraticSmile(e.T, pts);
     });
-  }, []);
+  }, [chainSet, spot, riskFreeRate]);
 
   const surface = useMemo(() => buildVolSurface(smiles), [smiles]);
 
+  if (loading || !chainSet || !quote || !expiry) {
+    return (
+      <div className="space-y-6">
+        <PageHeader sym={sym} symbolTicker={symbolTicker} setSymbolTicker={setSymbolTicker} />
+        <div className="py-16 text-center text-sm text-ink-400">Loading {sym.name} option chain…</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-widest text-teal-400">Equity Options</div>
-        <h1 className="mt-1 text-2xl font-semibold text-ink-50">
-          {equityUnderlying} option chain, parity &amp; volatility surface
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm text-ink-300">
-          Spot <span className="font-mono text-ink-100">{equitySpot.toFixed(2)}</span> &middot; r{' '}
+      <PageHeader sym={sym} symbolTicker={symbolTicker} setSymbolTicker={setSymbolTicker} />
+
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <Pill tone={quote.source === 'live' ? 'up' : 'warn'}>
+          {quote.source === 'live' ? 'Live spot' : 'Sample spot (live fetch unavailable)'}
+        </Pill>
+        <span className="text-ink-300">
+          Spot <span className="font-mono text-ink-100">{formatMoney(spot, sym.currency)}</span> &middot; r{' '}
           <span className="font-mono text-ink-100">{pct(riskFreeRate)}</span> &middot; q{' '}
-          <span className="font-mono text-ink-100">{pct(dividendYield)}</span>. All quotes are synthetic sample data.
-        </p>
+          <span className="font-mono text-ink-100">{pct(dividendYield)}</span>
+        </span>
       </div>
 
       <Card
         title="Option chain"
-        eyebrow="Live-style quotes"
+        eyebrow="Model-priced off the live spot above"
         right={
-          <select value={expiryId} onChange={(e) => setExpiryId(e.target.value)} className={selectClass}>
+          <select value={activeExpiryId} onChange={(e) => setExpiryId(e.target.value)} className={selectClass}>
             {expiries.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.label} expiry
@@ -126,7 +163,7 @@ export default function OptionsPage() {
               {strikes.map((k) => {
                 const c = byStrikeType.get(`${k}-call`);
                 const p = byStrikeType.get(`${k}-put`);
-                const atm = Math.abs(k - equitySpot) < 15;
+                const atm = Math.abs(k - spot) / spot < 0.01;
                 return (
                   <tr key={k} className={`border-b border-ink-800/50 text-center font-mono ${atm ? 'bg-accent-500/5' : ''}`}>
                     <td className="py-1.5 text-teal-300">{c ? pct(c.iv.iv) : '—'}</td>
@@ -144,9 +181,10 @@ export default function OptionsPage() {
             </tbody>
           </table>
         </div>
+        <p className="mt-2 text-xs text-ink-500">Prices in {sym.currency}.</p>
       </Card>
 
-      <Card title="Trade blotter" eyebrow="Buy &amp; sell side" right={<Pill>{trades.length} trades</Pill>}>
+      <Card title="Trade blotter" eyebrow="Buy &amp; sell side" right={<Pill>{chainSet.trades.length} trades</Pill>}>
         <div className="scroll-thin max-h-72 overflow-y-auto overflow-x-auto">
           <table className="w-full min-w-[700px] text-left text-sm">
             <thead className="sticky top-0 bg-ink-900">
@@ -162,7 +200,7 @@ export default function OptionsPage() {
               </tr>
             </thead>
             <tbody>
-              {trades.map((t) => (
+              {chainSet.trades.map((t) => (
                 <tr key={t.id} className="border-b border-ink-800/50 font-mono">
                   <td className="py-1.5 pr-4 text-ink-400">{t.time}</td>
                   <td className="py-1.5 pr-4 text-ink-300">{t.expiryLabel}</td>
@@ -191,7 +229,7 @@ export default function OptionsPage() {
               live market is consistent with that identity, within a small tolerance for bid/ask noise.
             </p>
             <Field label="Strike">
-              <select value={parityStrike} onChange={(e) => setParityStrike(Number(e.target.value))} className={selectClass}>
+              <select value={activeParityStrike} onChange={(e) => setParityStrike(Number(e.target.value))} className={selectClass}>
                 {strikes.map((k) => (
                   <option key={k} value={k}>
                     {k}
@@ -224,7 +262,7 @@ export default function OptionsPage() {
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Implied vs. realized volatility" eyebrow={`${equityUnderlying} · ATM term structure`}>
+        <Card title="Implied vs. realized volatility" eyebrow={`${sym.symbol} · ATM term structure`}>
           <div className="h-72">
             <DarkPlot
               data={[
@@ -234,7 +272,7 @@ export default function OptionsPage() {
                   type: 'scatter',
                   mode: 'lines+markers',
                   name: 'ATM implied vol',
-                  line: { color: plotColors.accent, width: 3 },
+                  line: { color: colors.accent, width: 3 },
                   marker: { size: 7 },
                 },
                 {
@@ -243,7 +281,7 @@ export default function OptionsPage() {
                   type: 'scatter',
                   mode: 'lines',
                   name: '21d realized vol (flat ref.)',
-                  line: { color: plotColors.teal, width: 2, dash: 'dash' },
+                  line: { color: colors.teal, width: 2, dash: 'dash' },
                 },
               ]}
               layout={{ yaxis: { title: { text: 'vol (%)' } }, legend: { orientation: 'h', y: -0.2 } }}
@@ -253,28 +291,28 @@ export default function OptionsPage() {
             <Stat label="Realized vol (1y, ann.)" value={pct(rv)} />
             <Stat
               label="ATM IV − RV spread"
-              value={pct(atmIvByExpiry[1]?.iv - rv)}
-              tone={atmIvByExpiry[1]?.iv - rv >= 0 ? 'up' : 'down'}
+              value={pct((atmIvByExpiry[1]?.iv ?? 0) - rv)}
+              tone={(atmIvByExpiry[1]?.iv ?? 0) - rv >= 0 ? 'up' : 'down'}
             />
           </div>
         </Card>
 
-        <Card title="Rolling 21d realized volatility" eyebrow={`${equityUnderlying} spot history`}>
+        <Card title="Rolling 21d realized volatility" eyebrow={`${sym.symbol} spot history`}>
           <div className="h-72">
             <DarkPlot
               data={[
                 {
-                  x: rvSeries.map((p) => p.index),
+                  x: rvSeries.map((p) => series?.dates[p.index] ?? p.index),
                   y: rvSeries.map((p) => p.vol * 100),
                   type: 'scatter',
                   mode: 'lines',
                   fill: 'tozeroy',
-                  fillcolor: 'rgba(79,124,255,0.12)',
-                  line: { color: plotColors.accent2, width: 2 },
+                  fillcolor: `${colors.accent2}1f`,
+                  line: { color: colors.accent2, width: 2 },
                   name: 'Realized vol',
                 },
               ]}
-              layout={{ xaxis: { title: { text: 'trading day index' } }, yaxis: { title: { text: 'vol (%)' } } }}
+              layout={{ yaxis: { title: { text: 'vol (%)' } } }}
             />
           </div>
         </Card>
@@ -291,9 +329,9 @@ export default function OptionsPage() {
                   y: surface.tenors,
                   z: surface.iv.map((row) => row.map((v) => v * 100)),
                   colorscale: [
-                    [0, '#22c8b0'],
-                    [0.5, '#4f7cff'],
-                    [1, '#f2495c'],
+                    [0, colors.teal],
+                    [0.5, colors.accent],
+                    [1, colors.rose],
                   ],
                   showscale: false,
                   contours: { z: { show: true, usecolormap: true, project: { z: true } } },
@@ -302,9 +340,9 @@ export default function OptionsPage() {
               layout={{
                 margin: { l: 0, r: 0, t: 10, b: 0 },
                 scene: {
-                  xaxis: { title: { text: 'log-moneyness k' }, gridcolor: plotColors.grid },
-                  yaxis: { title: { text: 'tenor (y)' }, gridcolor: plotColors.grid },
-                  zaxis: { title: { text: 'IV (%)' }, gridcolor: plotColors.grid },
+                  xaxis: { title: { text: 'log-moneyness k' }, gridcolor: colors.grid },
+                  yaxis: { title: { text: 'tenor (y)' }, gridcolor: colors.grid },
+                  zaxis: { title: { text: 'IV (%)' }, gridcolor: colors.grid },
                   bgcolor: 'transparent',
                 },
               }}
@@ -333,44 +371,92 @@ export default function OptionsPage() {
               </li>
             </ol>
             <p className="text-xs text-ink-500">
-              The negative slope in strike (higher vol for low strikes) is the classic equity index skew: downside
-              puts are bid for crash protection.
+              The strikes, quotes and blotter here are model-generated off the live spot above (not sourced from an
+              exchange option-chain feed) — see the overview page for why.
             </p>
           </div>
         </div>
       </Card>
 
       <Card title="Risk of a single contract" eyebrow="Black-Scholes greeks">
-        <GreeksExplorer />
+        <GreeksExplorer sym={sym} spot={spot} riskFreeRate={riskFreeRate} chainSet={chainSet} />
       </Card>
     </div>
   );
 }
 
-function GreeksExplorer() {
-  const atmStrike = chain.filter((r) => r.expiryId === expiries[1].id).reduce(
-    (best, r) => (Math.abs(r.strike - equitySpot) < Math.abs(best.strike - equitySpot) ? r : best),
-    chain[0],
+function PageHeader({
+  sym,
+  symbolTicker,
+  setSymbolTicker,
+}: {
+  sym: (typeof equitySymbols)[number];
+  symbolTicker: string;
+  setSymbolTicker: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-widest text-teal-400">Equity Options</div>
+        <h1 className="mt-1 text-2xl font-semibold text-ink-50">{sym.name} option chain, parity &amp; volatility surface</h1>
+        <p className="mt-2 max-w-3xl text-sm text-ink-300">
+          Pick any underlying below — the spot is fetched live where possible; the chain itself is priced through
+          real Black-Scholes math off that spot, not sourced from an exchange feed.
+        </p>
+      </div>
+      <select value={symbolTicker} onChange={(e) => setSymbolTicker(e.target.value)} className={selectClass}>
+        <optgroup label="India (NSE / BSE)">
+          {indiaSymbols.map((s) => (
+            <option key={s.symbol} value={s.symbol}>
+              {s.name} · {s.symbol}
+            </option>
+          ))}
+        </optgroup>
+        <optgroup label="Global">
+          {globalSymbols.map((s) => (
+            <option key={s.symbol} value={s.symbol}>
+              {s.name} · {s.symbol}
+            </option>
+          ))}
+        </optgroup>
+      </select>
+    </div>
   );
-  const [strike, setStrike] = useState(atmStrike.strike);
-  const [type, setType] = useState<'call' | 'put'>('call');
-  const [expId, setExpId] = useState(expiries[1].id);
-  const exp = expiries.find((e) => e.id === expId)!;
-  const row = chain.find((r) => r.expiryId === expId && r.strike === strike && r.type === type);
+}
 
-  const iv = row ? impliedVol(row.mid, { S: equitySpot, K: strike, T: exp.T, r: riskFreeRate, q: dividendYield, type }) : null;
-  const strikesForExp = Array.from(new Set(chain.filter((r) => r.expiryId === expId).map((r) => r.strike))).sort((a, b) => a - b);
+function GreeksExplorer({
+  sym,
+  spot,
+  riskFreeRate,
+  chainSet,
+}: {
+  sym: (typeof equitySymbols)[number];
+  spot: number;
+  riskFreeRate: number;
+  chainSet: NonNullable<ReturnType<typeof buildOptionChain>>;
+}) {
+  const [expId, setExpId] = useState(chainSet.expiries[1]?.id ?? chainSet.expiries[0].id);
+  const exp = chainSet.expiries.find((e) => e.id === expId) ?? chainSet.expiries[0];
+  const strikesForExp = Array.from(new Set(chainSet.chain.filter((r) => r.expiryId === expId).map((r) => r.strike))).sort(
+    (a, b) => a - b,
+  );
+  const atmStrike = strikesForExp.reduce((best, k) => (Math.abs(k - spot) < Math.abs(best - spot) ? k : best), strikesForExp[0]);
+  const [strike, setStrike] = useState(atmStrike);
+  const [type, setType] = useState<'call' | 'put'>('call');
+  const row = chainSet.chain.find((r) => r.expiryId === expId && r.strike === strike && r.type === type);
+
+  const iv = row ? impliedVol(row.mid, { S: spot, K: strike, T: exp.T, r: riskFreeRate, q: dividendYield, type }) : null;
 
   const greeks = useMemo(() => {
     if (!iv) return null;
-    return bsGreeks({ S: equitySpot, K: strike, T: exp.T, r: riskFreeRate, q: dividendYield, sigma: iv.iv, type });
-  }, [iv, strike, exp.T, type]);
+    return bsGreeks({ S: spot, K: strike, T: exp.T, r: riskFreeRate, q: dividendYield, sigma: iv.iv, type });
+  }, [iv, spot, strike, exp.T, riskFreeRate, type]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[auto_auto_auto_1fr] lg:items-end">
       <Field label="Expiry">
         <select value={expId} onChange={(e) => setExpId(e.target.value)} className={selectClass}>
-          {expiries.map((e) => (
+          {chainSet.expiries.map((e) => (
             <option key={e.id} value={e.id}>
               {e.label}
             </option>
@@ -394,7 +480,7 @@ function GreeksExplorer() {
       </Field>
       {greeks && row && (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-          <Stat label="Mid" value={row.mid.toFixed(2)} />
+          <Stat label="Mid" value={formatMoney(row.mid, sym.currency)} />
           <Stat label="IV" value={pct(iv!.iv)} />
           <Stat label="Delta" value={greeks.delta.toFixed(3)} />
           <Stat label="Gamma" value={greeks.gamma.toFixed(4)} />

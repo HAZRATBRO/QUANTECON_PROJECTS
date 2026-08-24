@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
 
 const BondsPage = lazy(() => import('./pages/BondsPage'));
+const EquityPage = lazy(() => import('./pages/EquityPage'));
 const OptionsPage = lazy(() => import('./pages/OptionsPage'));
 const FxPage = lazy(() => import('./pages/FxPage'));
 
@@ -22,6 +23,14 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <BondsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="equity"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <EquityPage />
               </Suspense>
             }
           />

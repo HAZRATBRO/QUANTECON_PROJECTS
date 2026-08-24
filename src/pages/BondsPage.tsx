@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import DarkPlot, { plotColors } from '../components/DarkPlot';
+import DarkPlot from '../components/DarkPlot';
+import { useChartColors } from '../lib/chartColors';
 import { Card, Field, Katex, MathBlock, Pill, selectClass, Stat } from '../components/ui';
 import { bondInstruments } from '../data/bondInstruments';
 import {
@@ -18,6 +19,7 @@ function pct(x: number, dp = 3) {
 }
 
 export default function BondsPage() {
+  const colors = useChartColors();
   const analyses = useMemo<Record<string, BondRisk>>(() => {
     const map: Record<string, BondRisk> = {};
     for (const inst of bondInstruments) map[inst.id] = analyzeBond(inst);
@@ -50,11 +52,13 @@ export default function BondsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-widest text-accent-400">Bonds &amp; Rates</div>
-        <h1 className="mt-1 text-2xl font-semibold text-ink-50">Bond pricing, risk &amp; the yield curve</h1>
+        <div className="text-xs font-semibold uppercase tracking-widest text-accent-400">Bonds &amp; Rates &middot; India</div>
+        <h1 className="mt-1 text-2xl font-semibold text-ink-50">Indian G-Sec pricing, risk &amp; the yield curve</h1>
         <p className="mt-2 max-w-3xl text-sm text-ink-300">
-          Prices below are sample market quotes; every yield, duration, convexity figure and curve point is derived
-          from them live using the methods described here.
+          Prices below are illustrative sample T-Bill/G-Sec quotes at plausible current levels — no free live
+          sovereign-yield-curve API exists, so unlike the Equity/Options/FX pages this data isn't fetched live. Every
+          yield, duration, convexity figure and curve point is still derived from them live using the methods
+          described here.
         </p>
       </div>
 
@@ -90,7 +94,7 @@ export default function BondsPage() {
         </div>
       </Card>
 
-      <Card title="Instruments" eyebrow="Sample curve inputs" right={<Pill>{bondInstruments.length} instruments</Pill>}>
+      <Card title="Instruments" eyebrow="Illustrative Indian T-Bills & G-Secs" right={<Pill>{bondInstruments.length} instruments</Pill>}>
         <div className="scroll-thin overflow-x-auto">
           <table className="w-full min-w-[820px] text-left text-sm">
             <thead>
@@ -154,7 +158,7 @@ export default function BondsPage() {
                   type: 'scatter',
                   mode: 'lines',
                   name: 'f(y) = P(y) − P_mkt',
-                  line: { color: plotColors.line, width: 2 },
+                  line: { color: colors.line, width: 2 },
                 },
                 {
                   x: [curveData.ys[0] * 100, curveData.ys[curveData.ys.length - 1] * 100],
@@ -162,7 +166,7 @@ export default function BondsPage() {
                   type: 'scatter',
                   mode: 'lines',
                   showlegend: false,
-                  line: { color: plotColors.grid, width: 1, dash: 'dot' },
+                  line: { color: colors.grid, width: 1, dash: 'dot' },
                 },
                 {
                   x: iterMarkers.map((it) => it.x * 100),
@@ -170,8 +174,8 @@ export default function BondsPage() {
                   type: 'scatter',
                   mode: 'lines+markers',
                   name: 'Newton iterations',
-                  marker: { color: plotColors.amber, size: 8 },
-                  line: { color: plotColors.amber, width: 1, dash: 'dash' },
+                  marker: { color: colors.amber, size: 8 },
+                  line: { color: colors.amber, width: 1, dash: 'dash' },
                 },
               ]}
               layout={{
@@ -268,7 +272,7 @@ export default function BondsPage() {
                   type: 'scatter',
                   mode: 'lines',
                   name: 'Nelson-Siegel fit',
-                  line: { color: plotColors.accent, width: 3 },
+                  line: { color: colors.accent, width: 3 },
                 },
                 {
                   x: zeroCurve.map((p) => p.t),
@@ -276,7 +280,7 @@ export default function BondsPage() {
                   type: 'scatter',
                   mode: 'markers',
                   name: 'Bootstrapped zero',
-                  marker: { color: plotColors.teal, size: 9, symbol: 'diamond' },
+                  marker: { color: colors.teal, size: 9, symbol: 'diamond' },
                 },
               ]}
               layout={{

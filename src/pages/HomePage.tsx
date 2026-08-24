@@ -17,21 +17,28 @@ const tiles = [
     to: '/bonds',
     title: 'Bonds & Rates',
     tag: 'Newton-Raphson · Bootstrapping · Nelson-Siegel',
-    desc: 'Price/yield mechanics, duration & convexity, a sovereign curve built by bootstrapping zero rates from bills/notes/bonds, and a smooth Nelson-Siegel fit.',
+    desc: 'Price/yield mechanics, duration & convexity, an Indian G-Sec curve built by bootstrapping zero rates from T-Bills/G-Secs, and a smooth Nelson-Siegel fit.',
     accent: 'from-accent-500/20 to-transparent',
+  },
+  {
+    to: '/equity',
+    title: 'Equity',
+    tag: 'Live Quotes · Realized Vol · Single-Stock Pricer',
+    desc: "Live-fetched quotes and price history for NSE/BSE names (NIFTY, SENSEX, top stocks) and global tickers, with realized vol and a per-stock option pricer.",
+    accent: 'from-rose-500/20 to-transparent',
   },
   {
     to: '/options',
     title: 'Equity Options',
     tag: 'Black-Scholes · Implied Vol · Vol Surface',
-    desc: 'A live-style option chain with a buy/sell trade blotter, put-call parity verification on real quotes, implied vs. realized vol, and a 3D vol surface.',
+    desc: 'Pick any stock or index — a live spot feeds an option chain with a buy/sell trade blotter, put-call parity verification, implied vs. realized vol, and a 3D vol surface.',
     accent: 'from-teal-500/20 to-transparent',
   },
   {
     to: '/fx',
     title: 'FX Options',
     tag: 'Garman-Kohlhagen · Forward Parity · Delta Surface',
-    desc: 'EUR/USD option chain and blotter, forward-based put-call parity, implied vs. realized FX vol, and a delta/tenor vol surface.',
+    desc: 'USD/INR and other India-first pairs by default, live spot, forward-based put-call parity, implied vs. realized FX vol, and a delta/tenor vol surface.',
     accent: 'from-amber-500/20 to-transparent',
   },
 ];
@@ -112,18 +119,21 @@ export default function HomePage() {
       <WelcomeBar />
 
       <div className="max-w-3xl">
-        <div className="text-xs font-semibold uppercase tracking-widest text-accent-400">Financial Calculator</div>
+        <div className="text-xs font-semibold uppercase tracking-widest text-accent-400">Financial Calculator · India-first</div>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
-          Rates, options and FX analytics — with the math shown, not hidden.
+          Rates, equities, options and FX — with the math shown, not hidden.
         </h1>
         <p className="mt-3 text-sm leading-relaxed text-ink-300">
-          Every number on this site is computed client-side from the underlying algorithm: Newton-Raphson root
-          finding for yields and implied vols, curve bootstrapping, and least-squares smile fitting for the vol
-          surfaces. Market data is synthetic and clearly labeled as sample data — the models and solvers are real.
+          NSE/BSE names and INR pairs come first, with major global markets alongside. Equity and FX prices are
+          fetched live from open, keyless sources directly in your browser; option chains are always priced from
+          those real inputs through the Newton-Raphson, Black-Scholes/Garman-Kohlhagen and vol-surface math shown on
+          each page, not sourced from an exchange feed. Where a live fetch can't succeed (network, rate limits,
+          browser CORS policy) or no free live source exists at all (sovereign bond yields), the page falls back to
+          clearly-labeled sample data — the models and solvers are always real.
         </p>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {tiles.map((t) => (
           <Link key={t.to} to={t.to} className="group block">
             <Card className={`h-full bg-gradient-to-br ${t.accent} transition-transform group-hover:-translate-y-0.5 group-hover:border-ink-500`}>
@@ -139,7 +149,14 @@ export default function HomePage() {
       </div>
 
       <Card title="What's under the hood" eyebrow="Methodology">
-        <div className="grid gap-6 text-sm text-ink-300 md:grid-cols-3">
+        <div className="grid gap-6 text-sm text-ink-300 md:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <div className="font-semibold text-ink-100">Live data, honestly labeled</div>
+            <p className="mt-1 leading-relaxed">
+              Equity and FX pages fetch spot prices and history from open, keyless sources at page load. Every page
+              shows a "Live" or "Sample data" badge so it's never ambiguous which one you're looking at.
+            </p>
+          </div>
           <div>
             <div className="font-semibold text-ink-100">Root finding</div>
             <p className="mt-1 leading-relaxed">
