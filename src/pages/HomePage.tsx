@@ -1,5 +1,16 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Card } from '../components/ui';
+import { Card, inputClass } from '../components/ui';
+
+const NAME_KEY = 'qec-username';
+
+function readStoredName(): string | null {
+  try {
+    return localStorage.getItem(NAME_KEY);
+  } catch {
+    return null; // localStorage unavailable (private browsing, etc.) — fall back to the anonymous greeting.
+  }
+}
 
 const tiles = [
   {
@@ -25,9 +36,81 @@ const tiles = [
   },
 ];
 
+function WelcomeBar() {
+  const [name, setName] = useState<string | null>(readStoredName);
+  const [draft, setDraft] = useState('');
+
+  function save(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    setName(trimmed);
+    try {
+      localStorage.setItem(NAME_KEY, trimmed);
+    } catch {
+      // ignore — greeting still works for this session
+    }
+  }
+
+  if (name) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink-700/60 bg-ink-900/60 px-5 py-3">
+        <p className="text-sm text-ink-200">
+          Welcome back, <span className="font-semibold text-ink-50">{name}</span> — pick up where you left off below.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setName(null);
+            setDraft('');
+            try {
+              localStorage.removeItem(NAME_KEY);
+            } catch {
+              // ignore
+            }
+          }}
+          className="text-xs font-medium text-ink-400 hover:text-ink-100"
+        >
+          Not you? Reset
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        save(draft);
+      }}
+      className="flex flex-wrap items-center gap-3 rounded-2xl border border-ink-700/60 bg-ink-900/60 px-5 py-3"
+    >
+      <label htmlFor="username" className="text-sm text-ink-300">
+        What should we call you?
+      </label>
+      <input
+        id="username"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Your name"
+        maxLength={40}
+        className={inputClass + ' w-48'}
+      />
+      <button
+        type="submit"
+        className="rounded-lg bg-accent-500 px-3 py-1.5 text-sm font-medium text-ink-950 transition-colors hover:bg-accent-400 disabled:opacity-40"
+        disabled={!draft.trim()}
+      >
+        Save
+      </button>
+    </form>
+  );
+}
+
 export default function HomePage() {
   return (
     <div className="space-y-8">
+      <WelcomeBar />
+
       <div className="max-w-3xl">
         <div className="text-xs font-semibold uppercase tracking-widest text-accent-400">Financial Calculator</div>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink-50 sm:text-4xl">
